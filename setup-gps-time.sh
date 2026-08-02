@@ -35,14 +35,22 @@ for pkg in chrony gpsd gpsd-clients; do
 done
 
 section "chrony GPS refclock"
+# Keep a restore point before touching anything, the way setup-gps-serial.sh
+# does for /etc/sysconfig/gpsd — a bad chrony.conf leaves the machine with no
+# clock discipline at all. Written unconditionally rather than only on the
+# append path, so a machine that already had the refclock still ends up with
+# a copy. Never overwrite an existing .bak: the first one is the only truly
+# pre-GPS copy, and clobbering it with an already-edited file destroys the undo.
+if [[ -f "$CHRONY_CONF.bak" ]]; then
+    skip "$CHRONY_CONF.bak already exists (kept — it is the older copy)"
+else
+    cp -a "$CHRONY_CONF" "$CHRONY_CONF.bak"
+    did "saved $CHRONY_CONF.bak"
+fi
+
 if grep -q "refclock SHM 0" "$CHRONY_CONF"; then
     skip "refclock already present in $CHRONY_CONF"
 else
-    # Keep a copy before appending, the same way setup-gps-serial.sh does for
-    # /etc/sysconfig/gpsd — a bad chrony.conf leaves the machine with no clock
-    # discipline at all, so the undo path matters.
-    cp -a "$CHRONY_CONF" "$CHRONY_CONF.bak"
-    did "saved $CHRONY_CONF.bak"
     cat >> "$CHRONY_CONF" <<'CONF'
 
 # --- GPS time via gpsd shared memory (SiRF on /dev/ttyS3) ---
