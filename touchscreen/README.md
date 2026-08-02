@@ -71,9 +71,18 @@ Gestures the daemon synthesizes:
 | tap | `BTN_LEFT` click at the touch point |
 | touch + move past ~90 raw units | `BTN_LEFT` drag |
 | press and hold ~0.6 s, stationary | `BTN_RIGHT` click |
+| drag in the right-edge strip | `REL_WHEEL` scroll (like dragging a scrollbar) |
 
-Tunables live at the top of `cf30-touch-mouse`: `HOLD_MS` (hold-to-right-click
-time) and `MOVE_THRESH` (tap-vs-drag threshold).
+**Scroll strip.** A touch that *starts* in the rightmost strip of the screen
+(past `SCROLL_ZONE`, default the last 8%) scrolls with vertical finger movement
+instead of moving the cursor or clicking — one wheel tick per `SCROLL_STEP` raw
+units. It sits where the scrollbar already is and is far easier to hit than the
+thin scrollbar thumb. The virtual mouse carries `REL_WHEEL` for this.
+
+Tunables at the top of `cf30-touch-mouse`: `HOLD_MS` (hold-to-right-click time),
+`MOVE_THRESH` (tap-vs-drag threshold), `SCROLL_ZONE` (strip width, fraction of
+screen), `SCROLL_STEP` (finger travel per tick), and `SCROLL_REVERSE` (flip the
+scroll direction).
 
 ## Calibration
 
