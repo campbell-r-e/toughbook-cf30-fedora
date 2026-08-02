@@ -25,10 +25,15 @@ Configuration → GPS, its own I/O + IRQ; 0x2E8 / IRQ 5 avoids COM1 and COM2),
 then:
 
 ```sh
-sudo bash setup-gps-serial.sh      # configure gpsd on /dev/ttyS3
+sudo bash setup-gps-serial.sh      # find the receiver, configure gpsd
 sudo bash setup-gps-time.sh        # add a chrony refclock fed by gpsd
 cgps -s                            # watch the fix
 ```
+
+`setup-gps-serial.sh` probes the real serial ports for NMEA rather than assuming
+`/dev/ttyS3`, and takes `--scan` (just locate the receiver), `--status` (report
+satellites and fix, change nothing), `--device`/`--baud` (skip detection),
+`--dry-run` and `--force`. Run it with `--help` for the full list.
 
 `setup-gps-time.sh` adds a gpsd shared-memory refclock so `chrony` disciplines
 the clock from GPS once the receiver has a fix. It won't lock without a clear
@@ -43,8 +48,9 @@ your finger, tap = click, hold = right click — plus a 4-corner calibrator:
 
 ```sh
 cd touchscreen
-sudo bash install-touchscreen.sh   # install + enable the service
-sudo cf30-touch-calibrate          # 4-corner calibration (run at the laptop)
+sudo bash install-touchscreen.sh              # install + enable the service
+sudo cf30-touch-calibrate                     # 4-corner calibration (at the laptop)
+sudo bash install-touchscreen.sh --uninstall  # remove it all again
 ```
 
 Full write-up in [`touchscreen/README.md`](touchscreen/README.md).
@@ -52,11 +58,38 @@ Full write-up in [`touchscreen/README.md`](touchscreen/README.md).
 ## Desktop
 
 `setup-desktop.sh` sets the LXQt panel clock to 12-hour local time and fixes the
-blank desktop icons (the shipped `oxygen` icon theme is an incomplete stub). See
-[`DESKTOP.md`](DESKTOP.md).
+blank desktop icons (the `oxygen` icon theme shipped on this install is an
+incomplete stub). Run it as **your normal user, not root** — it edits
+`~/.config/lxqt` and restarts your panel:
+
+```sh
+bash setup-desktop.sh              # ICON_THEME=breeze by default
+```
+
+See [`DESKTOP.md`](DESKTOP.md).
+
+## What these scripts change
+
+They are idempotent and safe to re-run, but they do touch system files. Outside
+your home directory:
+
+| Script | Writes |
+|---|---|
+| `setup-gps-serial.sh` | `/etc/sysconfig/gpsd` (old copy kept as `.bak`); enables `gpsd.socket` + `gpsd.service`; adds your user to `dialout`; installs `gpsd`, `gpsd-clients` |
+| `setup-gps-time.sh` | appends a `refclock SHM 0` block to `/etc/chrony.conf`; enables gpsd; restarts `chronyd`; installs `chrony`, `gpsd`, `gpsd-clients` |
+| `touchscreen/install-touchscreen.sh` | `/usr/local/bin/cf30-touch-*`, `/etc/udev/rules.d/72-cf30-touchscreen.rules`, `/etc/systemd/system/cf30-touch-mouse.service`, `/etc/modules-load.d/uinput.conf`; installs `python3-evdev` |
+| `cf30-touch-calibrate` | `/etc/udev/rules.d/73-cf30-touch-calibration.rules` (generated, per-panel) |
+| `setup-desktop.sh` | nothing outside `~/.config/lxqt` |
+
+`--uninstall` reverses the touchscreen install (it leaves the generated
+calibration rule and `uinput.conf` in place, both harmless).
 
 ## Notes
 
-- Tested on Fedora 44 LXQt under the Mir/miriway Wayland compositor.
+- Tested on Fedora 44 LXQt under the Mir/miriway Wayland compositor, on x86-64.
+  Nothing here is CF-30-exclusive in principle, but the device IDs, the serial
+  port and the BIOS steps are.
 - SELinux is run **permissive** on this build; details in
-  [`DESKTOP.md`](DESKTOP.md).
+  [`DESKTOP.md`](DESKTOP.md). None of these scripts change your SELinux mode.
+- Provided as-is under the MIT license. They run as root and reconfigure system
+  services — read them before you run them.

@@ -7,8 +7,9 @@ right click — on Fedora 44 running LXQt under **Mir/miriway** (Wayland).
 Quick start:
 
 ```
-sudo bash install-touchscreen.sh    # install + enable the service
-sudo cf30-touch-calibrate           # 4-corner calibration (run at the laptop)
+sudo bash install-touchscreen.sh              # install + enable the service
+sudo cf30-touch-calibrate                     # 4-corner calibration (at the laptop)
+sudo bash install-touchscreen.sh --uninstall  # remove tools, rule and service
 ```
 
 ## The hardware
@@ -36,12 +37,19 @@ ENV{ID_VENDOR_ID}=="0430", ENV{ID_MODEL_ID}=="0530",
 ```
 
 After that, `libinput list-devices` shows `Capabilities: touch`. Apply it live
-without a reboot by re-adding the USB interface:
+without a reboot by re-adding the USB interface — the interface name differs per
+machine, so look it up rather than copying `1-2:1.0`:
 
 ```
-echo -n 1-2:1.0 | sudo tee /sys/bus/usb/drivers/usbhid/unbind
-echo -n 1-2:1.0 | sudo tee /sys/bus/usb/drivers/usbhid/bind
+# find it: the interface directory under the 0430:0530 USB device
+grep -l 0430 /sys/bus/usb/devices/*/idVendor | xargs -n1 dirname
+IFACE=1-2:1.0                      # <- whatever the above turned up, plus :1.0
+echo -n $IFACE | sudo tee /sys/bus/usb/drivers/usbhid/unbind
+echo -n $IFACE | sudo tee /sys/bus/usb/drivers/usbhid/bind
 ```
+
+`cf30-touch-calibrate` does this lookup and rebind for you after writing a
+matrix, so you only need it when applying the classification rule by hand.
 
 ### 2. Mir does not emulate a pointer from touch
 
@@ -80,8 +88,15 @@ other apps and drag it — pressing at the moved-to position instead would grab 
 empty space beside the handle. To scroll, drag the app's own scrollbar; there is
 no separate scroll gesture.
 
-Tunables at the top of `cf30-touch-mouse`: `HOLD_MS` (hold-to-right-click time)
-and `MOVE_THRESH` (how far a touch must move before it counts as a drag).
+Tunables at the top of `cf30-touch-mouse`: `HOLD_MS` (hold-to-right-click time,
+600 ms) and `MOVE_THRESH` (how far a touch must move before it counts as a drag,
+60 raw units). Edit them in `/usr/local/bin/cf30-touch-mouse` and
+`systemctl restart cf30-touch-mouse`.
+
+The daemon reloads the calibration matrix on **SIGHUP**
+(`sudo systemctl kill -s HUP cf30-touch-mouse`), so a re-calibration does not
+need a restart. If the panel disappears — a USB rebind, for instance — it waits
+for it to come back and re-grabs it.
 
 ## Calibration
 
@@ -128,3 +143,7 @@ sudo cf30-touch-calibrate --reset    # back to identity
   bypassed — the daemon must apply the matrix itself. It does.
 * `python3-evdev` and the `uinput` kernel module are required; the installer
   loads `uinput` now and via `/etc/modules-load.d/uinput.conf` at boot.
+* Both tools must run as root — they need `/dev/input/event*` and `/dev/uinput`.
+* `cf30-touch-calibrate` unpacks raw `input_event` structs with the 64-bit
+  layout (`llHHi`, 24 bytes). On a 32-bit kernel the timeval halves are 4 bytes
+  each and that format would need changing. The CF-30 here is x86-64.

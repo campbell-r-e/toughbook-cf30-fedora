@@ -3,6 +3,10 @@
 Small desktop fixes for the CF-30 build. `setup-desktop.sh` applies the clock and
 icon-theme changes; the rest is documented here because it bit us.
 
+Run it as **your normal user, not root** — it only edits `~/.config/lxqt` and
+restarts your own panel, and it refuses to run under `sudo`. Pick a different
+icon theme with `ICON_THEME=papirus bash setup-desktop.sh`.
+
 ## 12-hour clock
 
 The LXQt panel's **worldclock** plugin defaults to a 24-hour custom format. To
@@ -23,7 +27,8 @@ panel is stopped, then relaunch it — otherwise your change is clobbered.
 Symptom: desktop icons (Computer, Home, Trash…) show as text labels with no
 images. Cause: `icon_theme=oxygen` in `~/.config/lxqt/lxqt.conf`, but the
 installed `oxygen` theme here is a **9-file stub** with none of the standard
-icons. Fix — switch to a complete theme (`breeze`, ~7,800 icons, already the
+icons. Note this is about the `oxygen` package as installed here, not oxygen in
+general. Fix — switch to a complete theme (`breeze`, ~7,800 icons, already the
 configured fallback):
 
 ```ini
