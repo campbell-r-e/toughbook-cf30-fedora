@@ -69,20 +69,19 @@ Gestures the daemon synthesizes:
 | Gesture | Output |
 |---|---|
 | tap | `BTN_LEFT` click at the touch point |
-| touch + move past ~90 raw units | `BTN_LEFT` drag |
+| touch + move past ~60 raw units | `BTN_LEFT` drag |
 | press and hold ~0.6 s, stationary | `BTN_RIGHT` click |
-| drag in the right-edge strip | `REL_WHEEL` scroll (like dragging a scrollbar) |
 
-**Scroll strip.** A touch that *starts* in the rightmost strip of the screen
-(past `SCROLL_ZONE`, default the last 8%) scrolls with vertical finger movement
-instead of moving the cursor or clicking — one wheel tick per `SCROLL_STEP` raw
-units. It sits where the scrollbar already is and is far easier to hit than the
-thin scrollbar thumb. The virtual mouse carries `REL_WHEEL` for this.
+**Dragging grabs at the touch point.** When a touch turns into a drag, the
+button is pressed *at the original touch point* (the cursor is still sitting
+there — it doesn't follow the finger until the drag begins), then it follows.
+That's what lets you grab a **scrollbar thumb, slider or handle** in Settings and
+other apps and drag it — pressing at the moved-to position instead would grab the
+empty space beside the handle. To scroll, drag the app's own scrollbar; there is
+no separate scroll gesture.
 
-Tunables at the top of `cf30-touch-mouse`: `HOLD_MS` (hold-to-right-click time),
-`MOVE_THRESH` (tap-vs-drag threshold), `SCROLL_ZONE` (strip width, fraction of
-screen), `SCROLL_STEP` (finger travel per tick), and `SCROLL_REVERSE` (flip the
-scroll direction).
+Tunables at the top of `cf30-touch-mouse`: `HOLD_MS` (hold-to-right-click time)
+and `MOVE_THRESH` (how far a touch must move before it counts as a drag).
 
 ## Calibration
 

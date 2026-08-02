@@ -13,9 +13,9 @@ This daemon fixes that the way Windows Vista's pen did:
 
 Gestures:
   * tap                     -> left click at that point
-  * touch and drag          -> left-button drag
+  * touch and drag          -> left-button drag, grabbed AT the touch point so
+                               scrollbar thumbs / sliders / handles come with you
   * press and hold (~0.6 s) -> right click (Vista-style)
-  * drag in the right-edge strip -> scroll wheel (like dragging a scrollbar)
 
 Calibration is read from the same udev rule the calibrator writes
 (LIBINPUT_CALIBRATION_MATRIX in 73-cf30-touch-calibration.rules); the matrix
@@ -35,14 +35,7 @@ PANEL_NAME = "Fujitsu Component USB Touch Panel"
 RULE = "/etc/udev/rules.d/73-cf30-touch-calibration.rules"
 VMAX = 32767            # virtual absolute-axis range
 HOLD_MS = 600           # press-and-hold time before it becomes a right click
-MOVE_THRESH = 90        # raw units (panel is 0..4096) before a hold becomes a drag
-
-# Right-edge scroll strip: a touch that STARTS past SCROLL_ZONE (fraction of the
-# screen width, so 0.92 = rightmost 8%) scrolls with vertical finger movement
-# instead of clicking — one wheel tick per SCROLL_STEP raw units of travel.
-SCROLL_ZONE = 0.92
-SCROLL_STEP = 120
-SCROLL_REVERSE = False  # False = scrollbar-style (finger down scrolls down)
+MOVE_THRESH = 60        # raw units (panel is 0..4096) before a touch becomes a drag
 
 
 def find_panel():
@@ -96,7 +89,6 @@ class TouchMouse:
     def open_uinput(self):
         cap = {
             e.EV_KEY: [e.BTN_LEFT, e.BTN_RIGHT, e.BTN_MIDDLE],
-            e.EV_REL: [e.REL_WHEEL],
             e.EV_ABS: [
                 (e.ABS_X, AbsInfo(0, 0, VMAX, 0, 0, 0)),
                 (e.ABS_Y, AbsInfo(0, 0, VMAX, 0, 0, 0)),
@@ -129,10 +121,6 @@ class TouchMouse:
         self.button(code, 1)
         self.button(code, 0)
 
-    def scroll(self, ticks):
-        self.ui.write(e.EV_REL, e.REL_WHEEL, ticks)
-        self.ui.syn()
-
     def run(self):
         self.open_panel()
         self.open_uinput()
@@ -141,9 +129,8 @@ class TouchMouse:
         cur_x = cur_y = None
         down_x = down_y = 0
         touching = False
-        state = None          # None | 'down' | 'drag' | 'scroll' | 'consumed'
+        state = None          # None | 'down' | 'drag' | 'consumed'
         down_t = 0.0
-        scroll_ref = 0
 
         while True:
             timeout = None
@@ -177,42 +164,35 @@ class TouchMouse:
                 elif ev.type == e.EV_KEY and ev.code == e.BTN_TOUCH:
                     if ev.value == 1:
                         touching = True
+                        state = 'down'
                         down_t = now
                         down_x, down_y = cur_x, cur_y
-                        if cur_x is not None and \
-                                self.to_screen(cur_x, cur_y)[0] / VMAX >= SCROLL_ZONE:
-                            state = 'scroll'          # started in the right-edge strip
-                            scroll_ref = cur_y        # don't move the cursor
-                        else:
-                            state = 'down'
-                            if cur_x is not None:
-                                self.move(cur_x, cur_y)
+                        if cur_x is not None:
+                            self.move(cur_x, cur_y)   # cursor to the touch point
                     else:
                         if state == 'down':
-                            if cur_x is not None:
-                                self.move(cur_x, cur_y)
-                            self.click(e.BTN_LEFT)          # tap -> left click
+                            self.click(e.BTN_LEFT)      # tap -> click at that point
                         elif state == 'drag':
-                            self.button(e.BTN_LEFT, 0)      # end drag
+                            self.button(e.BTN_LEFT, 0)  # end drag
                         touching = False
                         state = None
                 elif ev.type == e.EV_SYN and ev.code == e.SYN_REPORT:
-                    if not touching:
+                    if not touching or cur_x is None:
                         continue
-                    if state == 'scroll' and cur_y is not None:
-                        steps = int((cur_y - scroll_ref) / SCROLL_STEP)
-                        if steps != 0:
-                            # finger down (steps>0) scrolls down = negative wheel
-                            self.scroll(steps if SCROLL_REVERSE else -steps)
-                            scroll_ref += steps * SCROLL_STEP
-                    elif cur_x is not None:
+                    if state == 'down' and down_x is not None and (
+                        abs(cur_x - down_x) > MOVE_THRESH
+                        or abs(cur_y - down_y) > MOVE_THRESH
+                    ):
+                        # Movement while down = a drag. Press the button NOW, while
+                        # the cursor is still on the original touch point, so a
+                        # scrollbar thumb / slider / handle there gets grabbed —
+                        # THEN follow the finger. (Pressing at the moved position
+                        # would grab empty space next to the handle.)
+                        self.button(e.BTN_LEFT, 1)
+                        state = 'drag'
                         self.move(cur_x, cur_y)
-                        if state == 'down' and down_x is not None and (
-                            abs(cur_x - down_x) > MOVE_THRESH
-                            or abs(cur_y - down_y) > MOVE_THRESH
-                        ):
-                            self.button(e.BTN_LEFT, 1)      # movement -> start a drag
-                            state = 'drag'
+                    elif state == 'drag':
+                        self.move(cur_x, cur_y)         # keep dragging
 
 
 def main():
