@@ -161,9 +161,6 @@ def daemon_active():
     return os.system("systemctl is-active --quiet %s" % DAEMON) == 0
 
 
-def daemon_exists():
-    return os.system("systemctl cat %s >/dev/null 2>&1" % DAEMON) == 0
-
 
 def find_usb_interface():
     base = "/sys/bus/usb/devices"

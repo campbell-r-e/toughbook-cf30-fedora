@@ -31,11 +31,17 @@ import time
 
 from evdev import InputDevice, UInput, AbsInfo, list_devices, ecodes as e
 
+try:
+    from evdev.uinput import UInputError
+except ImportError:     # older python-evdev raises plain OSError
+    UInputError = OSError
+
 PANEL_NAME = "Fujitsu Component USB Touch Panel"
 RULE = "/etc/udev/rules.d/73-cf30-touch-calibration.rules"
 VMAX = 32767            # virtual absolute-axis range
 HOLD_MS = 600           # press-and-hold time before it becomes a right click
 MOVE_THRESH = 60        # raw units (panel is 0..4096) before a touch becomes a drag
+UINPUT_WAIT_S = 60      # how long to wait for /dev/uinput at boot before failing
 
 
 def find_panel():
@@ -94,8 +100,20 @@ class TouchMouse:
                 (e.ABS_Y, AbsInfo(0, 0, VMAX, 0, 0, 0)),
             ],
         }
-        self.ui = UInput(cap, name="CF30 Virtual Touch Mouse",
-                         vendor=0x1234, product=0x5678)
+        # At boot this can win the race against systemd-modules-load, so
+        # /dev/uinput may not exist yet. Wait for it rather than dying — five
+        # quick deaths in ten seconds would trip systemd's start limit and leave
+        # the unit failed until someone logs in and resets it.
+        deadline = time.monotonic() + UINPUT_WAIT_S
+        while True:
+            try:
+                self.ui = UInput(cap, name="CF30 Virtual Touch Mouse",
+                                 vendor=0x1234, product=0x5678)
+                return
+            except (OSError, UInputError):
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(1.0)
 
     def to_screen(self, rx, ry):
         u = (rx - self.xmin) / float(self.xmax - self.xmin)

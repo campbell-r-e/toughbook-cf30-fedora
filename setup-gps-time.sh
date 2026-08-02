@@ -38,6 +38,11 @@ section "chrony GPS refclock"
 if grep -q "refclock SHM 0" "$CHRONY_CONF"; then
     skip "refclock already present in $CHRONY_CONF"
 else
+    # Keep a copy before appending, the same way setup-gps-serial.sh does for
+    # /etc/sysconfig/gpsd — a bad chrony.conf leaves the machine with no clock
+    # discipline at all, so the undo path matters.
+    cp -a "$CHRONY_CONF" "$CHRONY_CONF.bak"
+    did "saved $CHRONY_CONF.bak"
     cat >> "$CHRONY_CONF" <<'CONF'
 
 # --- GPS time via gpsd shared memory (SiRF on /dev/ttyS3) ---
@@ -55,9 +60,13 @@ systemctl enable --now gpsd.socket gpsd.service >/dev/null 2>&1 || true
 did "gpsd.socket and gpsd.service enabled"
 
 section "Restart chrony"
+# enable as well as restart: the refclock lives in chrony.conf, so it only comes
+# back after a reboot if chronyd itself is enabled. It usually is on Fedora, but
+# "usually" is not the same as "after this script ran".
+systemctl enable chronyd >/dev/null 2>&1 || true
 systemctl restart chronyd
 sleep 2
-did "chronyd restarted"
+did "chronyd enabled and restarted"
 
 section "Result"
 chronyc -n sources 2>/dev/null || true

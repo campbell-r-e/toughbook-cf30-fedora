@@ -8,6 +8,40 @@ Because this is a collection of setup scripts rather than a library, "breaking"
 means a change that alters what a script writes to your system, removes a
 command-line flag, or requires you to re-run something you had already applied.
 
+## [1.0.1] — 2026-08-02
+
+Reboot-hardening and cleanup. Re-run `install-touchscreen.sh` to pick up the
+unit change; `setup-gps-time.sh` is worth re-running too, since it now enables
+`chronyd`. Neither is required if your machine already comes up correctly.
+
+### Fixed
+
+- `cf30-touch-mouse.service` set no `StartLimitIntervalSec`, so with
+  `Restart=always` and `RestartSec=2` five quick failures inside ten seconds
+  tripped systemd's default start limit and left the unit **permanently
+  failed**. At boot the daemon can lose the race against `systemd-modules-load`
+  and exit immediately for want of `/dev/uinput`, which is exactly that
+  pattern — and on this machine the daemon is the only pointing device, so a
+  failed unit meant no cursor. The unit now sets `StartLimitIntervalSec=0`,
+  orders itself after module load and udev, and runs `modprobe uinput` first.
+- `cf30-touch-mouse` now waits up to 60 s for `/dev/uinput` to appear instead of
+  dying on the first attempt, the same way it already waited for the panel.
+- `setup-gps-time.sh` now enables `chronyd` rather than only restarting it. The
+  refclock lives in `chrony.conf`, so it only survives a reboot if chronyd is
+  actually enabled — true by default on Fedora, but the script should not
+  assume it.
+- `setup-gps-time.sh` now saves `/etc/chrony.conf.bak` before appending, the
+  way `setup-gps-serial.sh` already did for `/etc/sysconfig/gpsd`.
+
+### Removed
+
+- Dead `daemon_exists()` helper in `cf30-touch-calibrate`.
+
+### Documentation
+
+- New "Surviving a reboot" section in the README: what comes back on its own,
+  how, and the commands to verify it.
+
 ## [1.0.0] — 2026-08-02
 
 First public release. Everything below is tested on a Panasonic Toughbook CF-30
@@ -71,4 +105,5 @@ running Fedora 44 (LXQt under the Mir/miriway Wayland compositor) on x86-64.
 - SELinux runs permissive on this build; that is documented in `DESKTOP.md`, but
   no script here changes your SELinux mode.
 
+[1.0.1]: https://github.com/campbell-r-e/toughbook-cf30-fedora/releases/tag/v1.0.1
 [1.0.0]: https://github.com/campbell-r-e/toughbook-cf30-fedora/releases/tag/v1.0.0

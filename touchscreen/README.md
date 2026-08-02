@@ -144,6 +144,11 @@ sudo cf30-touch-calibrate --reset    # back to identity
 * `python3-evdev` and the `uinput` kernel module are required; the installer
   loads `uinput` now and via `/etc/modules-load.d/uinput.conf` at boot.
 * Both tools must run as root — they need `/dev/input/event*` and `/dev/uinput`.
+* At boot the daemon can start before `uinput` is loaded or before the USB panel
+  enumerates. It waits for both rather than exiting, and the unit sets
+  `StartLimitIntervalSec=0` — otherwise five fast failures inside ten seconds
+  trip systemd's default start limit and the unit stays `failed` until you reset
+  it by hand, on a machine where this daemon is the only pointer you have.
 * `cf30-touch-calibrate` unpacks raw `input_event` structs with the 64-bit
   layout (`llHHi`, 24 bytes). On a 32-bit kernel the timeval halves are 4 bytes
   each and that format would need changing. The CF-30 here is x86-64.

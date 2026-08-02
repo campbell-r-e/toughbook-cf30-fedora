@@ -84,6 +84,38 @@ your home directory:
 `--uninstall` reverses the touchscreen install (it leaves the generated
 calibration rule and `uinput.conf` in place, both harmless).
 
+## Surviving a reboot
+
+Run the scripts once; everything below comes back on its own at the next boot.
+Nothing here needs to be re-run, and there is no login script to install.
+
+| Piece | How it comes back |
+|---|---|
+| GPS | `gpsd.socket` **and** `gpsd.service` are both enabled. Enabling only the socket is the classic trap: gpsd then stays dead after a reboot until some client connects, so nothing feeds chrony |
+| GPS time | the `refclock SHM 0` line lives in `/etc/chrony.conf`, and `chronyd` is enabled |
+| Touch panel classification | udev rules in `/etc/udev/rules.d` are re-read every boot |
+| Calibration | same — the generated `73-*` rule is applied by udev, and the daemon re-reads it on start |
+| Touch-to-mouse daemon | `cf30-touch-mouse.service`, `WantedBy=graphical.target` |
+| `uinput` module | `/etc/modules-load.d/uinput.conf` |
+| Desktop clock and icons | plain settings in `~/.config/lxqt`; LXQt reloads them at login |
+
+The touch daemon is the one with real boot-ordering exposure, since it needs
+both `/dev/uinput` (a module load) and the USB panel (an enumeration) before it
+can do anything. It waits for each of them instead of exiting, its unit sets
+`StartLimitIntervalSec=0` so a slow boot can never latch it into `failed`, and
+`Restart=always` covers the rest. That matters more than usual here: on a
+tablet-style machine this daemon *is* the pointer, so a failed unit means no
+cursor and no easy way to fix it.
+
+Check the whole lot after a reboot with:
+
+```sh
+systemctl is-enabled gpsd.socket gpsd.service chronyd cf30-touch-mouse.service
+systemctl status cf30-touch-mouse.service
+chronyc -n sources                 # the GPS refclock line
+sudo bash setup-gps-serial.sh --status
+```
+
 ## Notes
 
 - Tested on Fedora 44 LXQt under the Mir/miriway Wayland compositor, on x86-64.

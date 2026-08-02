@@ -1,9 +1,18 @@
 [Unit]
 Description=CF-30 touch panel as a Vista-style absolute mouse
 Documentation=man:libinput
+# uinput comes from /etc/modules-load.d/uinput.conf, and the panel is USB, so
+# both can still be settling when this starts. The daemon waits for each of
+# them itself; these just avoid the pointless early attempts.
+After=systemd-modules-load.service systemd-udevd.service
+# Never give up. With Restart=always and the default start limit (5 failures in
+# 10 s) a boot-time stumble would leave the unit failed until someone logged in
+# to reset it — on a machine whose only pointer IS this daemon.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
+ExecStartPre=-/usr/sbin/modprobe uinput
 ExecStart=/usr/local/bin/cf30-touch-mouse
 Restart=always
 RestartSec=2
