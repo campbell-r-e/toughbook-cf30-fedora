@@ -1,0 +1,4 @@
+# Panasonic CF-30 "Fujitsu Component USB Touch Panel" (0430:0530) reports pen/
+# stylus usages, so udev mislabels it ID_INPUT_TABLET and libinput treats it as
+# a tablet. Force it to be handled as a touchscreen instead.
+ACTION=="add|change", KERNEL=="event*", ENV{ID_VENDOR_ID}=="0430", ENV{ID_MODEL_ID}=="0530", ENV{ID_INPUT_TOUCHSCREEN}="1", ENV{ID_INPUT_TABLET}="0", ENV{ID_INPUT_TABLET_PAD}="0"

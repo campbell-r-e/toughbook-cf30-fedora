@@ -1,0 +1,12 @@
+[Unit]
+Description=CF-30 touch panel as a Vista-style absolute mouse
+Documentation=man:libinput
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cf30-touch-mouse
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+"""
+cf30-touch-mouse — make the CF-30 resistive touch panel behave like a mouse.
+
+Mir (this machine's Wayland compositor) does not emulate a pointer from a
+touchscreen, so taps don't drive the cursor and the desktop/menus ignore them.
+This daemon fixes that the way Windows Vista's pen did:
+
+  * it grabs the real panel ("Fujitsu Component USB Touch Panel", 0430:0530)
+    so Mir no longer sees raw touch events, and
+  * it creates a VIRTUAL ABSOLUTE MOUSE via uinput and drives it from the
+    panel, so the cursor jumps to wherever you touch.
+
+Gestures:
+  * tap                     -> left click at that point
+  * touch and drag          -> left-button drag
+  * press and hold (~0.6 s) -> right click (Vista-style)
+
+Calibration is read from the same udev rule the calibrator writes
+(LIBINPUT_CALIBRATION_MATRIX in 73-cf30-touch-calibration.rules); the matrix
+lives in raw-normalized [0,1] space, which is exactly what we apply here. Send
+SIGHUP to reload it without restarting.
+"""
+import os
+import re
+import select
+import signal
+import sys
+import time
+
+from evdev import InputDevice, UInput, AbsInfo, list_devices, ecodes as e
+
+PANEL_NAME = "Fujitsu Component USB Touch Panel"
+RULE = "/etc/udev/rules.d/73-cf30-touch-calibration.rules"
+VMAX = 32767            # virtual absolute-axis range
+HOLD_MS = 600           # press-and-hold time before it becomes a right click
+MOVE_THRESH = 90        # raw units (panel is 0..4096) before a hold becomes a drag
+
+
+def find_panel():
+    for path in list_devices():
+        try:
+            d = InputDevice(path)
+            if d.name == PANEL_NAME:
+                return d
+            d.close()
+        except OSError:
+            continue
+    return None
+
+
+def load_matrix():
+    m = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]      # identity
+    try:
+        txt = open(RULE).read()
+        # The rule writes it as  ENV{LIBINPUT_CALIBRATION_MATRIX}="a b c d e f"
+        hit = re.search(r'LIBINPUT_CALIBRATION_MATRIX\}?\s*="([^"]+)"', txt)
+        if hit:
+            vals = [float(x) for x in hit.group(1).split()]
+            if len(vals) == 6:
+                m = vals
+    except (OSError, ValueError):
+        pass
+    return m
+
+
+class TouchMouse:
+    def __init__(self):
+        self.matrix = load_matrix()
+        self.panel = None
+        self.ui = None
+        self.xmin, self.xmax = 0, 4096
+        self.ymin, self.ymax = 0, 4096
+
+    def open_panel(self):
+        while self.panel is None:
+            self.panel = find_panel()
+            if self.panel is None:
+                time.sleep(1.0)
+        self.panel.grab()
+        caps = self.panel.capabilities(absinfo=True)
+        for code, info in caps.get(e.EV_ABS, []):
+            if code == e.ABS_X:
+                self.xmin, self.xmax = info.min, info.max
+            elif code == e.ABS_Y:
+                self.ymin, self.ymax = info.min, info.max
+
+    def open_uinput(self):
+        cap = {
+            e.EV_KEY: [e.BTN_LEFT, e.BTN_RIGHT, e.BTN_MIDDLE],
+            e.EV_ABS: [
+                (e.ABS_X, AbsInfo(0, 0, VMAX, 0, 0, 0)),
+                (e.ABS_Y, AbsInfo(0, 0, VMAX, 0, 0, 0)),
+            ],
+        }
+        self.ui = UInput(cap, name="CF30 Virtual Touch Mouse",
+                         vendor=0x1234, product=0x5678)
+
+    def to_screen(self, rx, ry):
+        u = (rx - self.xmin) / float(self.xmax - self.xmin)
+        v = (ry - self.ymin) / float(self.ymax - self.ymin)
+        a, b, c, d, ee, f = self.matrix
+        cx = a * u + b * v + c
+        cy = d * u + ee * v + f
+        cx = min(1.0, max(0.0, cx))
+        cy = min(1.0, max(0.0, cy))
+        return int(cx * VMAX), int(cy * VMAX)
+
+    def move(self, rx, ry):
+        vx, vy = self.to_screen(rx, ry)
+        self.ui.write(e.EV_ABS, e.ABS_X, vx)
+        self.ui.write(e.EV_ABS, e.ABS_Y, vy)
+        self.ui.syn()
+
+    def button(self, code, val):
+        self.ui.write(e.EV_KEY, code, val)
+        self.ui.syn()
+
+    def click(self, code):
+        self.button(code, 1)
+        self.button(code, 0)
+
+    def run(self):
+        self.open_panel()
+        self.open_uinput()
+        fd = self.panel.fd
+
+        cur_x = cur_y = None
+        down_x = down_y = 0
+        touching = False
+        state = None          # None | 'down' | 'drag' | 'consumed'
+        down_t = 0.0
+
+        while True:
+            timeout = None
+            if touching and state == 'down':
+                timeout = max(0.0, HOLD_MS / 1000.0 - (time.monotonic() - down_t))
+            r, _, _ = select.select([fd], [], [], timeout)
+            now = time.monotonic()
+
+            if not r:
+                # select timed out -> a stationary hold has matured into a right click
+                if touching and state == 'down' and (now - down_t) * 1000 >= HOLD_MS:
+                    self.click(e.BTN_RIGHT)
+                    state = 'consumed'
+                continue
+
+            try:
+                events = list(self.panel.read())
+            except OSError:
+                # panel vanished (e.g. USB rebind during calibration) — reopen
+                self.panel = None
+                self.open_panel()
+                fd = self.panel.fd
+                continue
+
+            for ev in events:
+                if ev.type == e.EV_ABS:
+                    if ev.code == e.ABS_X:
+                        cur_x = ev.value
+                    elif ev.code == e.ABS_Y:
+                        cur_y = ev.value
+                elif ev.type == e.EV_KEY and ev.code == e.BTN_TOUCH:
+                    if ev.value == 1:
+                        touching = True
+                        state = 'down'
+                        down_t = now
+                        down_x, down_y = cur_x, cur_y
+                        if cur_x is not None:
+                            self.move(cur_x, cur_y)
+                    else:
+                        if state == 'down':
+                            if cur_x is not None:
+                                self.move(cur_x, cur_y)
+                            self.click(e.BTN_LEFT)          # tap -> left click
+                        elif state == 'drag':
+                            self.button(e.BTN_LEFT, 0)      # end drag
+                        touching = False
+                        state = None
+                elif ev.type == e.EV_SYN and ev.code == e.SYN_REPORT:
+                    if touching and cur_x is not None:
+                        self.move(cur_x, cur_y)
+                        if state == 'down' and down_x is not None and (
+                            abs(cur_x - down_x) > MOVE_THRESH
+                            or abs(cur_y - down_y) > MOVE_THRESH
+                        ):
+                            self.button(e.BTN_LEFT, 1)      # movement -> start a drag
+                            state = 'drag'
+
+
+def main():
+    if os.geteuid() != 0:
+        sys.exit("Run as root (needs /dev/input and /dev/uinput).")
+    tm = TouchMouse()
+
+    def reload_matrix(signum, frame):
+        tm.matrix = load_matrix()
+
+    signal.signal(signal.SIGHUP, reload_matrix)
+    try:
+        tm.run()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        try:
+            if tm.panel:
+                tm.panel.ungrab()
+        except OSError:
+            pass
+        if tm.ui:
+            tm.ui.close()
+
+
+if __name__ == "__main__":
+    main()
